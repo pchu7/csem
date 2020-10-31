@@ -1,0 +1,122 @@
+show the csem statement
+describe main goal of project
+
+> source /opt/rh/llvm-toolset-9.0/enable
+> make
+> make csem_build INPUT=input4
+(this will fail)
+show test/csem_input4.pp.c
+show test/csem_input4.ll
+
+
+> make ref_build INPUT=input4
+(show test/ref_input4.ll)
+explain how the makefile works
+run ./ref_csem_exe
+
+Do input1.c together with the class
+(start by compiling input1.c with csem and ref_csem)
+(run it with ref_csem, use echo $? to look at the return value)
+
+Look at the output of ref_csem in test/ref_input1.ll and compare to
+test/csem_input1.ll
+
+Note that compilation with csem tells you what you need to implement to get
+this input working:
+
+./csem < ./test/csem_input1.pp.c > ./test/csem_input1.ll
+sem: remainder of id not implemented
+sem: op1 not implemented
+sem: remainder of con not implemented
+sem: rel not implemented
+sem: m not implemented
+sem: remainder of con not implemented
+sem: doret not implemented
+sem: m not implemented
+sem: doif not implemented
+sem: remainder of con not implemented
+sem: doret not implemented
+
+------------------------------------------------------------
+
+finishing off input1 with backpatch:
+show them output of input1 again with csem and ref_csem
+
+rel() creates the comparison (note not complete):
+
+  Value *val;
+  if (*op == '<') {
+    if (x->s_type == T_INT && y->s_type == T_INT) {
+      val = Builder.CreateICmpSLT( (Value*)x->s_value,
+                                   (Value*)y->s_value ) :
+    }
+  }
+  return (ccexpr( s_node ( (void *) val, T_INT )));
+
+
+some comparisons do not use rel (e.g., if(x) ...). We still need to generate a
+comparison and branch in these cases. In our code, we put the branch in ccexpr
+and invoke ccexpr from rel().
+
+ccexpr() creates the branch. At this point, the locations of each branch are
+not yet known, so we use temporary labels. We pass back a semantic record with
+records of both the true and false branch of the conditional branch. We will
+later backpatch these instructions (note not complete):
+
+  BasicBlock *tmp_true, *tmp_false;
+  Value *val; 
+
+  tmp_true = create_tmp_label();
+  tmp_false = create_tmp_label();
+  val = Builder.CreateCondBr( (Value*)e->s_value, tmp_true, tmp_false );
+
+  return (node( (void *) NULL, (void *) NULL, 0, (struct sem_rec*) NULL,
+           (node ( val, tmp_true, 0, (struct sem_rec *) NULL,
+                   (struct sem_rec *) NULL, (struct sem_rec *) NULL)),
+           (node ( val, tmp_false, 0, (struct sem_rec *) NULL,
+                   (struct sem_rec *) NULL, (struct sem_rec *) NULL)) ));
+
+
+m needs to create a new label. In LLVM, we also update the insert point so new
+code is inserted at that new label. In LLVM, all basic blocks need to end in a
+branch or return instruction, which is why we have to check for the
+terminator:
+
+void* m ()
+{
+  BasicBlock *bb;
+
+  std::string label = new_label();
+  bb = create_named_label(label);
+
+  if (Builder.GetInsertBlock()->getTerminator() == NULL) {
+    Builder.CreateBr(bb);
+  }
+
+  Builder.SetInsertPoint(bb);
+  return (void *) bb;
+}
+
+doif() only needs to backpatch. Note that cond is the sem_rec returned by
+rel(). m1 and m2 are the basic blocks produced by m():
+
+  backpatch(cond->s_true, m1);
+  backpatch(cond->s_false, m2);
+
+backpatch() changes the branch instruction stored in the sem_rec to use real
+labels rather than tmp labels (note this is not complete):
+
+  unsigned i;
+  BranchInst *br_inst;
+
+  if ( (br_inst = llvm::dyn_cast<BranchInst>((Value*)rec->s_value)) ) {
+    for (i = 0; i < br_inst->getNumSuccessors(); i++) {
+      if ( br_inst->getSuccessor(i) == ((BasicBlock *) rec->s_bb) ) {
+        br_inst->setSuccessor(i, (BasicBlock *)bb);
+      }
+    }
+  } else {
+    fprintf(stderr, "error: backpatch with non-branch instruction\n");
+    exit(1);
+  }
+
