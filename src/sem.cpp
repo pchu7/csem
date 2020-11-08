@@ -770,6 +770,12 @@ struct sem_rec*
 op1(const char *op, struct sem_rec *y)
 {
   struct sem_rec *rec;
+  if (*op == '-') {
+	rec = s_node( Builder.CreateNeg( ((Value *)y->s_value) ), y->s_type);
+  }
+  if (*op == '~') {
+	rec = s_node( Builder.CreateNot( ((Value *)y->s_value) ), y->s_type);
+  }
   if (*op == '@') {
     y->s_type &= ~T_ADDR;
     rec = s_node( Builder.CreateLoad ( ((Value*) y->s_value) ), y->s_type );
@@ -905,8 +911,16 @@ cast (struct sem_rec *y, int t)
 struct sem_rec*
 set(const char *op, struct sem_rec *x, struct sem_rec *y)
 {
+  
+  Value * val;
+  if (op == NULL) {
+	val = Builder.CreateStore((Value *)y->s_value, (Value *)x->s_value);
+  }
+  //TODO
+  // add code to check for mismatching types and then do conversion with cast
   fprintf(stderr, "sem: set not implemented\n");
-  return ((struct sem_rec *) NULL);
+  //return ((struct sem_rec *) NULL);
+  return (s_node( (void *)val, x->s_type));
 }
 
 /*
@@ -923,8 +937,12 @@ set(const char *op, struct sem_rec *x, struct sem_rec *y)
 struct sem_rec*
 genstring(char *s)
 {
-  fprintf(stderr, "sem: genstring not implemented\n");
-  return (struct sem_rec *) NULL;
+  char * temp = parse_escape_chars(s);
+  Value * val = Builder.CreateGlobalStringPtr(temp);
+  return (s_node((void *)val, T_STR));
+  
+  //fprintf(stderr, "sem: genstring not implemented\n");
+  //return (struct sem_rec *) NULL;
 }
 
 void
