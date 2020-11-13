@@ -219,12 +219,29 @@ void backpatch(struct sem_rec *rec, void *bb)
  * LLVM API calls:
  * makeArrayRef(vector<Value*>)
  * IRBuilder::CreateCall(Function *, ArrayRef<Value*>)
+ * IRBuilder::CreateCall(Value *, ArrayRef<Value*>)
  */
 struct sem_rec*
 call(char *f, struct sem_rec *args)
 {
+  vector <Value *> v;
+
+  while (args != NULL) {
+	v.push_back( (Value *)args->s_value);
+	args = args->s_link;
+  }
+
+  vector <Value*> sorted_v;
+  for (int i = v.size() - 1; i >= 0; i--) {
+	  sorted_v.push_back(v[i]);
+  }
+
+  struct id_entry* func = lookup(f, 0);
+  Value * val = Builder.CreateCall( (Value *)func->i_value, makeArrayRef(sorted_v) );
+
   fprintf(stderr, "sem: call not implemented\n");
-  return ((struct sem_rec*) NULL);
+  return (s_node( (Value *) val, T_DOUBLE));
+  //return ((struct sem_rec*) NULL);
 }
 
 
@@ -240,8 +257,14 @@ call(char *f, struct sem_rec *args)
 struct sem_rec*
 ccand(struct sem_rec *e1, void *m, struct sem_rec *e2)
 {
+  //struct sem_rec* and_rec;
+
+  backpatch(e1->s_true, m);
+  //and_rec->s_true = e2->s_true;
+  //and_rec->s_false = merge(e1->s_false, e2->s_false);
   fprintf(stderr, "sem: ccand not implemented\n");
-  return ((struct sem_rec*) NULL);
+  return node((void *)NULL, (void *)NULL, 0, (struct sem_rec *)NULL, e2->strue, merge(e1->s_false, e2->s_false));
+  //return ((struct sem_rec*) NULL);
 }
 
 /*
@@ -454,6 +477,9 @@ void
 doifelse(struct sem_rec *cond, void *m1, struct sem_rec *n,
   void *m2, void *m3)
 {
+  backpatch(cond->s_true, m1);
+  backpatch(cond->s_false, m2);
+
   fprintf(stderr, "sem: doifelse not implemented\n");
   return;
 }
@@ -509,8 +535,10 @@ exprs(struct sem_rec *l, struct sem_rec *e)
 {
   //TODO use a vector or something to store these 2
   // new vector< Value *>[];
+  e->s_link = l;
+  return e;
   fprintf(stderr, "sem: exprs not implemented\n");
-  return ((struct sem_rec *) NULL);
+  //return ((struct sem_rec *) NULL);
 }
 
 /*
@@ -925,9 +953,16 @@ set(const char *op, struct sem_rec *x, struct sem_rec *y)
 {
   
   Value * val;
-  if (op == NULL) {
-	val = Builder.CreateStore((Value *)y->s_value, (Value *)x->s_value);
-  }
+  struct sem_rec* y_convert = y;
+  //if (op == NULL) {
+	if (x->s_type & T_INT && y->s_type & T_DOUBLE) {
+		y_convert = cast(y, T_INT);
+	}
+	if (x->s_type & T_DOUBLE && y->s_type & T_INT) {
+		y_convert = cast(y, T_DOUBLE);
+	}
+	val = Builder.CreateStore((Value *)y_convert->s_value, (Value *)x->s_value);
+  //}
   //TODO
   // add code to check for mismatching types and then do conversion with cast
   fprintf(stderr, "sem: set not implemented\n");
