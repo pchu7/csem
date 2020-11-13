@@ -507,6 +507,8 @@ dowhile(void *m1, struct sem_rec *cond, void *m2,
 struct sem_rec*
 exprs(struct sem_rec *l, struct sem_rec *e)
 {
+  //TODO use a vector or something to store these 2
+  // new vector< Value *>[];
   fprintf(stderr, "sem: exprs not implemented\n");
   return ((struct sem_rec *) NULL);
 }
@@ -771,6 +773,7 @@ op1(const char *op, struct sem_rec *y)
 {
   struct sem_rec *rec;
   if (*op == '-') {
+	//TODO add checks for floating point
 	rec = s_node( Builder.CreateNeg( ((Value *)y->s_value) ), y->s_type);
   }
   if (*op == '~') {
@@ -880,7 +883,16 @@ rel(const char *op, struct sem_rec *x, struct sem_rec *y)
 struct sem_rec*
 cast (struct sem_rec *y, int t)
 {
-  fprintf(stderr, "sem: cast not implemented\n");
+  struct sem_rec* rec;
+  if (t == T_INT) {
+	  rec = s_node ( Builder.CreateFPToSI( (Value *)y->s_value, Type::getInt32Ty(TheContext) ), T_DOUBLE );
+	  return rec;
+  }
+  else if (t == T_DOUBLE) {
+	  rec = s_node ( Builder.CreateSIToFP( (Value *)y->s_value, Type::getDoubleTy(TheContext) ), T_INT );
+	  return rec;
+  }
+  //fprintf(stderr, "sem: cast not implemented\n");
   return ((struct sem_rec *) NULL);
 }
 
