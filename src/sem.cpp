@@ -318,7 +318,8 @@ struct sem_rec*
 ccnot(struct sem_rec *e)
 {
   fprintf(stderr, "sem: ccnot not implemented\n");
-  return ((struct sem_rec *) NULL);
+  return node((void *)NULL, (void *)NULL, 0, (struct sem_rec *)NULL, e->s_false, e->s_true);
+  //return ((struct sem_rec *) NULL);
 }
 
 /*
@@ -429,6 +430,10 @@ void
 dofor(void *m1, struct sem_rec *cond, void *m2, struct sem_rec *n1, void *m3,
   struct sem_rec *n2, void *m4)
 {
+  backpatch(n1, m1);
+  backpatch(n2, m2);
+  backpatch(cond->s_true, m3);
+  backpatch(cond->s_false, m4);
   fprintf(stderr, "sem: dofor not implemented\n");
   return;
 }
@@ -522,6 +527,9 @@ void
 dowhile(void *m1, struct sem_rec *cond, void *m2,
   struct sem_rec *n, void *m3)
 {
+  backpatch(n, m1);
+  backpatch(cond->s_true, m2);
+  backpatch(cond->s_false, m3);
   fprintf(stderr, "sem: dowhile not implemented\n");
   return;
 }
@@ -720,8 +728,13 @@ id(char *x)
 struct sem_rec*
 indx(struct sem_rec *x, struct sem_rec *i)
 {
+  vector< Value *> v;
+  v.push_back(ConstantInt::get((Type *)IntegerType::getInt32Ty(TheContext), 0)); 
+  v.push_back((Value *)i->s_value);
+  Value *val = Builder.CreateGEP( (Value *)x->s_value, makeArrayRef(v)); 
   fprintf(stderr, "sem: indx not implemented\n");
-  return ((struct sem_rec *) NULL);
+  return s_node(val, x->s_type * ~T_ARRAY);
+  //return ((struct sem_rec *) NULL);
 }
 
 /*
@@ -852,8 +865,34 @@ op1(const char *op, struct sem_rec *y)
 struct sem_rec*
 op2(const char *op, struct sem_rec *x, struct sem_rec *y)
 {
+  struct sem_rec *rec;
+
+  if (x->s_type & T_INT && y->s_type & T_DOUBLE) {
+	x = cast(x, T_DOUBLE);
+  }
+  if (x->s_type & T_DOUBLE && y->s_type & T_INT) {
+	y = cast(y, T_DOUBLE);
+  }
+
+  if (*op == '+') {
+	  if (x->s_type & T_INT) {
+		rec = s_node( Builder.CreateAdd( (Value *)x->s_value, (Value *)y->s_value), x->s_type );
+	  }
+	  else if (x->s_type & T_DOUBLE) {
+		rec = s_node( Builder.CreateFAdd( (Value *)x->s_value, (Value *)y->s_value), x->s_type );
+	  }
+  }
+  else if (*op == '*') {
+	if (x->s_type & T_INT) {
+		rec = s_node( Builder.CreateMul( (Value *)x->s_value, (Value *)y->s_value), x->s_type ); 
+	}
+	else if (x->s_type & T_DOUBLE) {
+		rec = s_node( Builder.CreateFMul( (Value *)x->s_value, (Value *)y->s_value), x->s_type );
+    }
+  }
   fprintf(stderr, "sem: op2 not implemented\n");
-  return NULL;
+  return rec;
+  //return NULL;
 }
 
 /*
@@ -904,22 +943,22 @@ rel(const char *op, struct sem_rec *x, struct sem_rec *y)
 
   if (x->s_type & T_INT && y->s_type & T_DOUBLE) {
 	x_convert = cast(x, T_DOUBLE);
-	fprintf(stderr, "convert x\n");
+	//fprintf(stderr, "convert x\n");
   }
   if (x->s_type & T_DOUBLE && y->s_type & T_INT) {
 	y_convert = cast(y, T_DOUBLE);
-	fprintf(stderr, "convert y\n");
+	//fprintf(stderr, "convert y\n");
   }
 
   if (*op == '<') {
-	fprintf(stderr, "op <\n");
+	//fprintf(stderr, "op <\n");
     if (x_convert->s_type & T_INT && y_convert->s_type & T_INT) {
       val = Builder.CreateICmpSLT( (Value*) x_convert->s_value, (Value*) y_convert->s_value );
-	  fprintf(stderr, "signed int cmp\n");
+	  //fprintf(stderr, "signed int cmp\n");
     }
 	if (x_convert->s_type & T_DOUBLE && y_convert->s_type & T_DOUBLE) {
 	  val = Builder.CreateFCmpOLT( (Value *) x_convert->s_value, (Value *) y_convert->s_value );
-	  fprintf(stderr, "inside t_double\n");
+	  //fprintf(stderr, "inside t_double\n");
 	}
   }
   else if (*op == '>') {
@@ -931,13 +970,13 @@ rel(const char *op, struct sem_rec *x, struct sem_rec *y)
 	}
   }
   else if (*op == '=') {
-	fprintf(stderr, "op =\n");
+	//fprintf(stderr, "op =\n");
     if (x_convert->s_type & T_INT && y_convert->s_type & T_INT) {
-	  fprintf(stderr, "signed int cmp\n");
+	  //fprintf(stderr, "signed int cmp\n");
       val = Builder.CreateICmpEQ( (Value*) x_convert->s_value, (Value*) y_convert->s_value );
     }
 	else if (x_convert->s_type & T_DOUBLE && y_convert->s_type & T_DOUBLE) {
-	  fprintf(stderr, "inside t_double\n");
+	  //fprintf(stderr, "inside t_double\n");
 	  val = Builder.CreateFCmpOEQ( (Value *) x_convert->s_value, (Value *) y_convert->s_value );
 	}
   }
@@ -1000,10 +1039,42 @@ cast (struct sem_rec *y, int t)
 struct sem_rec*
 set(const char *op, struct sem_rec *x, struct sem_rec *y)
 {
+  fprintf(stderr, "set\n");
   
-  Value * val;
-  struct sem_rec* y_convert = y;
-  //if (op == NULL) {
+  Value * load_val;
+  Value * store_val;
+  struct sem_rec *y_convert = y;
+  struct sem_rec *x_convert = x;
+  struct sem_rec *rec = NULL;
+
+  if (x->s_type & T_INT && y->s_type & T_DOUBLE) {
+	x_convert = cast(x, T_DOUBLE);
+  }
+  if (x->s_type & T_DOUBLE && y->s_type & T_INT) {
+	y_convert = cast(y, T_DOUBLE);
+  }
+  fprintf(stderr, "%s after convert\n", op);
+
+  if (*op == '+') {
+	fprintf(stderr, "op = +\n");
+    load_val = Builder.CreateLoad((Value *)x_convert->s_value);
+	rec = op2(op, s_node((Value *)load_val, x_convert->s_type), y_convert);
+  }
+  else if (*op == '*') {
+	fprintf(stderr, "op = *\n");
+    load_val = Builder.CreateLoad((Value *)x_convert->s_value);
+	rec = op2(op, s_node((Value *)load_val, x_convert->s_type), y_convert);
+  }
+
+  if (rec != NULL) {
+	 store_val = Builder.CreateStore((Value *)rec->s_value, (Value *)x_convert->s_value);
+  }
+  else{
+	 fprintf(stderr, "else case\n");
+	 store_val = Builder.CreateStore((Value *)y_convert->s_value, (Value *)x_convert->s_value);
+  }
+  /*
+  if (op == NULL) {
 	if (x->s_type & T_INT && y->s_type & T_DOUBLE) {
 		y_convert = cast(y, T_INT);
 	}
@@ -1011,12 +1082,13 @@ set(const char *op, struct sem_rec *x, struct sem_rec *y)
 		y_convert = cast(y, T_DOUBLE);
 	}
 	val = Builder.CreateStore((Value *)y_convert->s_value, (Value *)x->s_value);
-  //}
+  }
+  */
   //TODO
   // add code to check for mismatching types and then do conversion with cast
   fprintf(stderr, "sem: set not implemented\n");
   //return ((struct sem_rec *) NULL);
-  return (s_node( (void *)val, x->s_type));
+  return (s_node( (void *)store_val, x_convert->s_type));
 }
 
 /*
