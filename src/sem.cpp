@@ -190,20 +190,23 @@ global_alloc (struct id_entry *p, int width)
  */
 void backpatch(struct sem_rec *rec, void *bb)
 {
-  unsigned i;
-  BranchInst *br_inst;
+  while (rec != NULL) {
+	unsigned i;
+	BranchInst *br_inst;
 
-  if ( (br_inst = llvm::dyn_cast<BranchInst>((Value*)rec->s_value)) ) {
-    for (i = 0; i < br_inst->getNumSuccessors(); i++ ) {
-      if (br_inst->getSuccessor(i) == ((BasicBlock *) rec->s_bb)) {
-        br_inst->setSuccessor(i, (BasicBlock *)bb);
-      }
-    }
-  } else {
-    fprintf(stderr, "error: backpatch with non-branch instruction\n");
-    exit(1);
+	if ( (br_inst = llvm::dyn_cast<BranchInst>((Value*)rec->s_value)) ) {
+	 for (i = 0; i < br_inst->getNumSuccessors(); i++ ) {
+	   if (br_inst->getSuccessor(i) == ((BasicBlock *) rec->s_bb)) {
+	     br_inst->setSuccessor(i, (BasicBlock *)bb);
+	   }
+	 }
+	} else {
+	 fprintf(stderr, "error: backpatch with non-branch instruction\n");
+	 exit(1);
+	}
+  
+  rec = rec->s_link;
   }
-
   //fprintf(stderr, "sem: backpatch not implemented\n");
   //return;
 }
@@ -263,7 +266,7 @@ ccand(struct sem_rec *e1, void *m, struct sem_rec *e2)
   //and_rec->s_true = e2->s_true;
   //and_rec->s_false = merge(e1->s_false, e2->s_false);
   fprintf(stderr, "sem: ccand not implemented\n");
-  return node((void *)NULL, (void *)NULL, 0, (struct sem_rec *)NULL, e2->strue, merge(e1->s_false, e2->s_false));
+  return node((void *)NULL, (void *)NULL, 0, (struct sem_rec *)NULL, e2->s_true, merge(e1->s_false, e2->s_false));
   //return ((struct sem_rec*) NULL);
 }
 
@@ -330,8 +333,10 @@ ccnot(struct sem_rec *e)
 struct sem_rec*
 ccor(struct sem_rec *e1, void *m, struct sem_rec *e2)
 {
+  backpatch(e1->s_false, m);
   fprintf(stderr, "sem: ccor not implemented\n");
-  return NULL;
+  return node((void *)NULL, (void *)NULL, 0, (struct sem_rec *)NULL, merge(e1->s_true, e2->s_true), e2->s_false);
+  //return NULL;
 }
 
 /*
@@ -459,8 +464,8 @@ doif(struct sem_rec *cond, void *m1, void *m2)
 {
   backpatch(cond->s_true, m1);
   backpatch(cond->s_false, m2);
-  //fprintf(stderr, "sem: doif not implemented\n");
-  //return;
+  fprintf(stderr, "sem: doif not implemented\n");
+  return;
 }
 
 /*
@@ -479,7 +484,7 @@ doifelse(struct sem_rec *cond, void *m1, struct sem_rec *n,
 {
   backpatch(cond->s_true, m1);
   backpatch(cond->s_false, m2);
-
+  backpatch(n, m3);
   fprintf(stderr, "sem: doifelse not implemented\n");
   return;
 }
@@ -783,8 +788,14 @@ m ()
  */
 struct sem_rec *n()
 {
+  //create_tmp_label
+  BasicBlock *bb;
+  bb = create_tmp_label();
+  Value *val = Builder.CreateBr(bb);
   fprintf(stderr, "sem: n not implemented\n");
-  return NULL;
+  return ( node ( val, bb, 0, (struct sem_rec *) NULL, (struct sem_rec *) NULL, (struct sem_rec *)NULL) );
+  //return s_node(val, T_LBL);
+  //return NULL;
 }
 
 /*
@@ -888,14 +899,52 @@ struct sem_rec*
 rel(const char *op, struct sem_rec *x, struct sem_rec *y)
 {
   Value *val;
-  if (*op == '<') {
-    if (x->s_type == T_INT && y->s_type == T_INT) {
-      val = Builder.CreateICmpSLT( (Value*) x->s_value,
-                                   (Value*) y->s_value );
-    }
+  struct sem_rec *y_convert = y;
+  struct sem_rec *x_convert = x;
+
+  if (x->s_type & T_INT && y->s_type & T_DOUBLE) {
+	x_convert = cast(x, T_DOUBLE);
+	fprintf(stderr, "convert x\n");
   }
-  return (ccexpr ( s_node ( (void*) val, T_INT )));
-  //fprintf(stderr, "sem: rel not implemented\n");
+  if (x->s_type & T_DOUBLE && y->s_type & T_INT) {
+	y_convert = cast(y, T_DOUBLE);
+	fprintf(stderr, "convert y\n");
+  }
+
+  if (*op == '<') {
+	fprintf(stderr, "op <\n");
+    if (x_convert->s_type & T_INT && y_convert->s_type & T_INT) {
+      val = Builder.CreateICmpSLT( (Value*) x_convert->s_value, (Value*) y_convert->s_value );
+	  fprintf(stderr, "signed int cmp\n");
+    }
+	if (x_convert->s_type & T_DOUBLE && y_convert->s_type & T_DOUBLE) {
+	  val = Builder.CreateFCmpOLT( (Value *) x_convert->s_value, (Value *) y_convert->s_value );
+	  fprintf(stderr, "inside t_double\n");
+	}
+  }
+  else if (*op == '>') {
+    if (x_convert->s_type & T_INT && y_convert->s_type & T_INT) {
+      val = Builder.CreateICmpSGT( (Value*) x_convert->s_value, (Value*) y_convert->s_value );
+    }
+	else if (x_convert->s_type & T_DOUBLE && y_convert->s_type & T_DOUBLE) {
+	  val = Builder.CreateFCmpOGT( (Value *) x_convert->s_value, (Value *) y_convert->s_value );
+	}
+  }
+  else if (*op == '=') {
+	fprintf(stderr, "op =\n");
+    if (x_convert->s_type & T_INT && y_convert->s_type & T_INT) {
+	  fprintf(stderr, "signed int cmp\n");
+      val = Builder.CreateICmpEQ( (Value*) x_convert->s_value, (Value*) y_convert->s_value );
+    }
+	else if (x_convert->s_type & T_DOUBLE && y_convert->s_type & T_DOUBLE) {
+	  fprintf(stderr, "inside t_double\n");
+	  val = Builder.CreateFCmpOEQ( (Value *) x_convert->s_value, (Value *) y_convert->s_value );
+	}
+  }
+
+  fprintf(stderr, "sem: rel not implemented\n");
+  //return (ccexpr ( s_node ( (void*) val, T_INT )));
+  return (ccexpr ( s_node ( (void *) val, x->s_type )));
   //return ((struct sem_rec *) NULL);
 }
 
@@ -913,11 +962,11 @@ cast (struct sem_rec *y, int t)
 {
   struct sem_rec* rec;
   if (t == T_INT) {
-	  rec = s_node ( Builder.CreateFPToSI( (Value *)y->s_value, Type::getInt32Ty(TheContext) ), T_DOUBLE );
+	  rec = s_node ( Builder.CreateFPToSI( (Value *)y->s_value, Type::getInt32Ty(TheContext) ), T_INT );
 	  return rec;
   }
   else if (t == T_DOUBLE) {
-	  rec = s_node ( Builder.CreateSIToFP( (Value *)y->s_value, Type::getDoubleTy(TheContext) ), T_INT );
+	  rec = s_node ( Builder.CreateSIToFP( (Value *)y->s_value, Type::getDoubleTy(TheContext) ), T_DOUBLE );
 	  return rec;
   }
   //fprintf(stderr, "sem: cast not implemented\n");
