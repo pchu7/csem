@@ -379,6 +379,7 @@ con(const char *x)
 void
 dobreak()
 {
+  looptop->breaks = merge(looptop->breaks, n());
   fprintf(stderr, "sem: dobreak not implemented\n");
   return;
 }
@@ -395,6 +396,7 @@ dobreak()
 void
 docontinue()
 {
+  looptop->conts = merge(looptop->conts, n()); 
   fprintf(stderr, "sem: docontinue not implemented\n");
   return;
 }
@@ -412,6 +414,14 @@ docontinue()
 void
 dodo(void *m1, void *m2, struct sem_rec *cond, void *m3)
 {
+  backpatch(cond->s_true, m1);
+  backpatch(cond->s_false, m3);
+  if (looptop->breaks != NULL) {
+	backpatch(looptop->breaks, m3);
+  }
+  if (looptop->conts != NULL) {
+	backpatch(looptop->conts, m1);
+  }
   fprintf(stderr, "sem: dodo not implemented\n");
   return;
 }
@@ -434,6 +444,12 @@ dofor(void *m1, struct sem_rec *cond, void *m2, struct sem_rec *n1, void *m3,
   backpatch(n2, m2);
   backpatch(cond->s_true, m3);
   backpatch(cond->s_false, m4);
+  if (looptop->breaks != NULL) {
+	  backpatch(looptop->breaks, m4);
+  }
+  if (looptop->conts != NULL) {
+	  backpatch(looptop->conts, m1);
+  }
   fprintf(stderr, "sem: dofor not implemented\n");
   return;
 }
@@ -527,9 +543,16 @@ void
 dowhile(void *m1, struct sem_rec *cond, void *m2,
   struct sem_rec *n, void *m3)
 {
-  backpatch(n, m1);
+  //backpatch(n, m1);
   backpatch(cond->s_true, m2);
   backpatch(cond->s_false, m3);
+  backpatch(n, m1);
+  if (looptop->breaks != NULL) {
+	  backpatch(looptop->breaks, m3);
+  }
+  if (looptop->conts != NULL) {
+	  backpatch(looptop->conts, m1);
+  }
   fprintf(stderr, "sem: dowhile not implemented\n");
   return;
 }
@@ -826,7 +849,12 @@ op1(const char *op, struct sem_rec *y)
   struct sem_rec *rec;
   if (*op == '-') {
 	//TODO add checks for floating point
-	rec = s_node( Builder.CreateNeg( ((Value *)y->s_value) ), y->s_type);
+	if (y->s_type & T_INT) {
+		rec = s_node( Builder.CreateNeg( ((Value *)y->s_value) ), y->s_type);
+	}
+	else if (y->s_type & T_DOUBLE) {
+		rec = s_node( Builder.CreateFNeg( ((Value *)y->s_value) ), y->s_type);
+	}
   }
   if (*op == '~') {
 	rec = s_node( Builder.CreateNot( ((Value *)y->s_value) ), y->s_type);
@@ -882,6 +910,14 @@ op2(const char *op, struct sem_rec *x, struct sem_rec *y)
 		rec = s_node( Builder.CreateFAdd( (Value *)x->s_value, (Value *)y->s_value), x->s_type );
 	  }
   }
+  else if (*op == '-') {
+	if (x->s_type & T_INT) {
+		rec = s_node( Builder.CreateSub( (Value *)x->s_value, (Value *)y->s_value), x->s_type ); 
+	}
+	else if (x->s_type & T_DOUBLE) {
+		rec = s_node( Builder.CreateFSub( (Value *)x->s_value, (Value *)y->s_value), x->s_type );
+    }
+  }
   else if (*op == '*') {
 	if (x->s_type & T_INT) {
 		rec = s_node( Builder.CreateMul( (Value *)x->s_value, (Value *)y->s_value), x->s_type ); 
@@ -889,6 +925,23 @@ op2(const char *op, struct sem_rec *x, struct sem_rec *y)
 	else if (x->s_type & T_DOUBLE) {
 		rec = s_node( Builder.CreateFMul( (Value *)x->s_value, (Value *)y->s_value), x->s_type );
     }
+  }
+  else if (*op == '/') {
+	if (x->s_type & T_INT) {
+		rec = s_node( Builder.CreateSDiv( (Value *)x->s_value, (Value *)y->s_value), x->s_type ); 
+	}
+	else if (x->s_type & T_DOUBLE) {
+		rec = s_node( Builder.CreateFDiv( (Value *)x->s_value, (Value *)y->s_value), x->s_type );
+    }
+  }
+  else if (*op == '%') {
+	if (x->s_type & T_INT) {
+		rec = s_node( Builder.CreateSRem( (Value *)x->s_value, (Value *)y->s_value), x->s_type ); 
+	}
+	// Operation only performs on integer values
+	//else if (x->s_type & T_DOUBLE) {
+	//	rec = s_node( Builder.CreateFDiv( (Value *)x->s_value, (Value *)y->s_value), x->s_type );
+    //}
   }
   fprintf(stderr, "sem: op2 not implemented\n");
   return rec;
@@ -905,8 +958,45 @@ op2(const char *op, struct sem_rec *x, struct sem_rec *y)
 struct sem_rec*
 opb(const char *op, struct sem_rec *x, struct sem_rec *y)
 {
+
+  struct sem_rec* rec;
+
+  if (x->s_type & T_INT && y->s_type & T_DOUBLE) {
+	y = cast(y, T_INT);
+  }
+  if (x->s_type & T_DOUBLE && y->s_type & T_INT) {
+	x = cast(x, T_INT);
+  }
+
+  if (*op == '|') {
+	  if (x->s_type & T_INT) {
+		rec = s_node( Builder.CreateOr( (Value *)x->s_value, (Value *)y->s_value), x->s_type );
+	  }
+  }
+  else if (*op == '^') {
+	if (x->s_type & T_INT) {
+		rec = s_node( Builder.CreateXor( (Value *)x->s_value, (Value *)y->s_value), x->s_type ); 
+	}
+  }
+  else if (*op == '&') {
+	if (x->s_type & T_INT) {
+		rec = s_node( Builder.CreateAnd( (Value *)x->s_value, (Value *)y->s_value), x->s_type ); 
+	}
+  }
+  else if (*op == '<') {
+	if (x->s_type & T_INT) {
+		rec = s_node( Builder.CreateShl( (Value *)x->s_value, (Value *)y->s_value), x->s_type ); 
+	}
+  }
+  else if (*op == '>') {
+	if (x->s_type & T_INT) {
+		rec = s_node( Builder.CreateAShr( (Value *)x->s_value, (Value *)y->s_value), x->s_type ); 
+	}
+  }
+
   fprintf(stderr, "sem: opb not implemented\n");
-  return ((struct sem_rec *) NULL);
+  return rec;
+  //return ((struct sem_rec *) NULL);
 }
 
 /*
@@ -1055,15 +1145,15 @@ set(const char *op, struct sem_rec *x, struct sem_rec *y)
   }
   fprintf(stderr, "%s after convert\n", op);
 
-  if (*op == '+') {
-	fprintf(stderr, "op = +\n");
+  if (*op == '+' || *op == '-' || *op == '*' || *op == '/' || *op == '%') {
+	//fprintf(stderr, "op = +\n");
     load_val = Builder.CreateLoad((Value *)x_convert->s_value);
 	rec = op2(op, s_node((Value *)load_val, x_convert->s_type), y_convert);
   }
-  else if (*op == '*') {
-	fprintf(stderr, "op = *\n");
+  else if (*op == '|' || *op == '^' || *op == '&' || *op == '<' || *op == '>') {
+	//fprintf(stderr, "op = *\n");
     load_val = Builder.CreateLoad((Value *)x_convert->s_value);
-	rec = op2(op, s_node((Value *)load_val, x_convert->s_type), y_convert);
+	rec = opb(op, s_node((Value *)load_val, x_convert->s_type), y_convert);
   }
 
   if (rec != NULL) {
