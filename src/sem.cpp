@@ -524,8 +524,13 @@ doifelse(struct sem_rec *cond, void *m1, struct sem_rec *n,
 void
 doret(struct sem_rec *e)
 {
+  if (e == NULL) {
+	Builder.CreateRetVoid();
+  }
+  else {
+	Builder.CreateRet( ((Value*) e->s_value) );
+  }
   fprintf(stderr, "sem: doret not fully implemented\n");
-  Builder.CreateRet( ((Value*) e->s_value) );
   return;
 }
 
@@ -1033,22 +1038,33 @@ rel(const char *op, struct sem_rec *x, struct sem_rec *y)
 
   if (x->s_type & T_INT && y->s_type & T_DOUBLE) {
 	x_convert = cast(x, T_DOUBLE);
-	//fprintf(stderr, "convert x\n");
   }
   if (x->s_type & T_DOUBLE && y->s_type & T_INT) {
 	y_convert = cast(y, T_DOUBLE);
-	//fprintf(stderr, "convert y\n");
   }
 
-  if (*op == '<') {
-	//fprintf(stderr, "op <\n");
+  if (strcmp(op, "<=") == 0) {
+    if (x_convert->s_type & T_INT && y_convert->s_type & T_INT) {
+      val = Builder.CreateICmpSLE( (Value*) x_convert->s_value, (Value*) y_convert->s_value );
+    }
+	if (x_convert->s_type & T_DOUBLE && y_convert->s_type & T_DOUBLE) {
+	  val = Builder.CreateFCmpOLE( (Value *) x_convert->s_value, (Value *) y_convert->s_value );
+	}
+  }
+  else if (strcmp(op, ">=") == 0) {
+    if (x_convert->s_type & T_INT && y_convert->s_type & T_INT) {
+      val = Builder.CreateICmpSGE( (Value*) x_convert->s_value, (Value*) y_convert->s_value );
+    }
+	if (x_convert->s_type & T_DOUBLE && y_convert->s_type & T_DOUBLE) {
+	  val = Builder.CreateFCmpOGE( (Value *) x_convert->s_value, (Value *) y_convert->s_value );
+	}
+  }
+  else if (*op == '<') {
     if (x_convert->s_type & T_INT && y_convert->s_type & T_INT) {
       val = Builder.CreateICmpSLT( (Value*) x_convert->s_value, (Value*) y_convert->s_value );
-	  //fprintf(stderr, "signed int cmp\n");
     }
 	if (x_convert->s_type & T_DOUBLE && y_convert->s_type & T_DOUBLE) {
 	  val = Builder.CreateFCmpOLT( (Value *) x_convert->s_value, (Value *) y_convert->s_value );
-	  //fprintf(stderr, "inside t_double\n");
 	}
   }
   else if (*op == '>') {
@@ -1060,14 +1076,19 @@ rel(const char *op, struct sem_rec *x, struct sem_rec *y)
 	}
   }
   else if (*op == '=') {
-	//fprintf(stderr, "op =\n");
     if (x_convert->s_type & T_INT && y_convert->s_type & T_INT) {
-	  //fprintf(stderr, "signed int cmp\n");
       val = Builder.CreateICmpEQ( (Value*) x_convert->s_value, (Value*) y_convert->s_value );
     }
 	else if (x_convert->s_type & T_DOUBLE && y_convert->s_type & T_DOUBLE) {
-	  //fprintf(stderr, "inside t_double\n");
 	  val = Builder.CreateFCmpOEQ( (Value *) x_convert->s_value, (Value *) y_convert->s_value );
+	}
+  }
+  else if (*op == '!') {
+    if (x_convert->s_type & T_INT && y_convert->s_type & T_INT) {
+      val = Builder.CreateICmpNE( (Value*) x_convert->s_value, (Value*) y_convert->s_value );
+    }
+	else if (x_convert->s_type & T_DOUBLE && y_convert->s_type & T_DOUBLE) {
+	  val = Builder.CreateFCmpONE( (Value *) x_convert->s_value, (Value *) y_convert->s_value );
 	}
   }
 
